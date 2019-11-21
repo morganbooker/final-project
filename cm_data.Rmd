@@ -1,0 +1,240 @@
+---
+title: "cm data"
+author: "Morgan Booker"
+date: "11/17/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(fs)
+library(tm)
+library(rvest)
+library(janitor)
+library(memoise)
+library(tidytext)
+library(wordcloud)
+library(tidyverse)
+library(RColorBrewer)
+```
+
+```{r load in all scripts}
+
+base_url <- "https://www.springfieldspringfield.co.uk/view_episode_scripts.php?tv-show=criminal-minds&episode="
+s <- c(rep(1:5, each = 20), rep(7, 7))
+season <- paste0("s0", s)
+ep <- c(rep(1:10, 6), 1:7)
+episode <- ifelse(ep < 10, paste0("e0", ep), paste0("e", ep))
+all.scripts <- NULL
+
+#Only the first 6 seasons
+for (i in 1:60) {
+  url <- paste0(base_url, season[i], episode[i])
+  webpage <- read_html(url)
+  script <- webpage %>% html_node(".scrolling-script-container")
+  all.scripts[i] <- html_text(script, trim = TRUE)
+}
+
+base_url <- "https://www.springfieldspringfield.co.uk/view_episode_scripts.php?tv-show=criminal-minds&episode="
+s <- c(rep(1, each = 22), rep(2, each = 22), rep(3, each = 20), rep(4, each = 26), rep(5, each = 23))
+season <- paste0("s0", s)
+ep <- c(rep(1:22, each = 1), rep(1:20, each = 1), rep(22:23, each = 1), rep(1:20, each = 1), rep(1:26, each = 1), rep(1:23, each = 1))
+episode <- ifelse(ep < 10, paste0("e0", ep), paste0("e", ep))
+all.scripts <- NULL
+
+#s02e21 missing from website
+
+for (i in 1:113) {
+  url <- paste0(base_url, season[i], episode[i])
+  webpage <- read_html(url)
+  script <- webpage %>% html_node(".scrolling-script-container")
+  all.scripts[i] <- html_text(script, trim = TRUE)
+}
+
+cm <- as.data.frame(all.scripts, stringsAsFactors = FALSE)
+counter <- paste0(season, episode)
+row.names(cm) <- counter[1:113]
+colnames(cm) <- "text"
+cm_scripts <- as_tibble(cm)
+
+cm_scripts <- cm_scripts %>% 
+  mutate(episode = paste0(season, episode)) %>% 
+  select(episode, text)
+```
+
+```{r load in csv data, include=FALSE}
+
+# Read in csv data and specify column types, drop NAs in caught category, since
+# analysis focuses on knowing whether or not the criminal was caught
+
+cm_data <- read_csv("cm_data.csv", col_type = cols(
+  episode = col_character(),
+  caught = col_character(),
+  alive = col_character(),
+  personal_story = col_character(),
+  intro_quote = col_character(),
+  closing_quote = col_character(),
+  criminal_gender = col_character(),
+  group_size = col_double(),
+  number_of_victims = col_double(),
+  criminal_type_1 = col_character(),
+  criminal_type_2 = col_character(),
+  criminal_type_3 = col_character(),
+  criminal_type_4 = col_character(),
+  criminal_type_5 = col_character()
+)) %>% 
+  filter(ep != "2x21") %>% 
+  mutate(episode = paste0(season, episode)) %>% 
+  select(-ep) %>% 
+  select(episode, everything())
+
+```
+
+```{r}
+cm_joint <- left_join(cm_scripts, cm_data, by = "episode")
+
+cm_words <- cm_joint %>% 
+  unnest_tokens(word, text)
+```
+
+```{r}
+bau <- c("jason", "gideon", "aaron", "hotch", "hotchner", "david", "dave", "rossi", "spencer", "spence", "reid", "derek", "morgan", "jennifer", "jj", "jareau", "emily", "prentiss", "penelope", "garcia", "elle", "greenaway")
+
+buzzwords <- c("unsub", "suspect", "murder", "criminal", "blood", "kill", "killer", "serial", "killers", "homicide", "homicidal", "psychopath", "sociopath", "sadist", "sadism", "signature", "trophy", "souvenir", "stalker", "victim", "profile", "arson", "arsonist", "bomber", "pedophile", "poison", "spree", "rapist", "rape", "kidnapper", "abducted", "hitman", "thrill", "con", "proxy", "gangster", "copycat", "terrorist", "cannibal")
+```
+
+```{r}
+cm_words %>% 
+  group_by(caught) %>% 
+  filter(word %in% bau) %>% 
+  count(word, sort = TRUE) %>% 
+  drop_na()
+```
+
+#### Is there a connection?
+This project aims to look at the recurring elements of Criminal Minds episodes to see if there is any connection between these recurring elements and the outcome of the episode (i.e. Is the culprit caught?). Are there creative elements that are connected with the outcome of the episode? For example, if the word "unsub" is said more often in an episode, is the criminal caught more often? Furthermore, the project will look at the frequency of some of these elements, including what the most common key words spoken are as well as the character names that are said the most.
+
+```{r}
+cm_words_bau %>% 
+  count(word, sort = TRUE) %>% 
+  mutate(word = reorder(word, n)) %>% 
+  
+  ggplot(aes(x = word, y = n, fill = n)) +
+  geom_col() +
+  coord_flip() +
+  ylab(NULL)
+
+cm_words_bau %>% 
+  group_by(season) %>% 
+  count(word, sort = TRUE) %>% 
+  mutate(word = reorder(word, n)) %>% 
+  
+  ggplot(aes(x = word, y = n, fill = n)) +
+  geom_col() +
+  coord_flip() +
+  facet_wrap(~season) +
+  ylab(NULL)
+
+```
+
+
+```{r}
+cm_words_bau <- cm_words %>% 
+  filter(word %in% bau) %>% 
+    mutate(word = case_when(
+    word == "spencer" | word == "spence" | word == "reid" ~ "Spencer Reid",
+    word == "derek" | word == "morgan" ~ "Derek Morgan",
+    word == "aaron" | word == "hotch" | word == "hotchner" ~ "Aaron Hotchner",
+    word == "david" | word == "dave" | word == "rossi" ~ "David Rossi",
+    word == "jason" | word == "gideon" ~ "Jason Gideon",
+    word == "emily" | word == "prentiss" ~ "Emily Prentiss",
+    word == "jennifer" | word == "jj" | word == "jareau" ~ "Jennifer Jareau",
+    word == "penelope" | word == "garcia" ~ "Penelope Garcia",
+    word == "elle" | word == "greenaway" ~ "Elle Greenaway"
+  )) %>% 
+    mutate(season =
+           case_when(
+             str_detect(episode, "s01") ~ "Season 1",
+             str_detect(episode, "s02") ~ "Season 2",
+             str_detect(episode, "s03") ~ "Season 3",
+             str_detect(episode, "s04") ~ "Season 4",
+             str_detect(episode, "s05") ~ "Season 5"
+           ))
+    
+cm_words_bau %>%
+  select(episode, word, caught, alive) %>% 
+  group_by(episode, caught) %>% 
+  count(word, sort = TRUE) %>% 
+  drop_na() %>% 
+  
+  ggplot(aes(x = word, y = n, fill = caught)) +
+  geom_col(position = "dodge") +
+  coord_flip()
+  
+#ideas: have diff tabs for each, so tab where it shows caught, tab for alive vs dead, tab for type of criminal, tab for quote, etc.
+#ideas: each tab has a drop down menu for season
+
+```
+
+```{r}
+cm_words_bau %>%
+  select(episode, word, caught, alive) %>% 
+  group_by(episode, alive) %>% 
+  count(word, sort = TRUE) %>% 
+  drop_na() %>% 
+  
+  ggplot(aes(x = word, y = n, fill = alive)) +
+  geom_col(position = "dodge") +
+  coord_flip()
+
+cm_words_bau %>%
+  select(episode, word, caught, alive, criminal_gender) %>% 
+  group_by(episode, criminal_gender) %>% 
+  count(word, sort = TRUE) %>% 
+  drop_na() %>% 
+  
+  ggplot(aes(x = word, y = n, fill = criminal_gender)) +
+  geom_col(position = "dodge") +
+  coord_flip()
+
+cm_words_bau %>%
+  select(episode, word, caught, alive, personal_story) %>% 
+  group_by(episode, personal_story) %>% 
+  count(word, sort = TRUE) %>% 
+  drop_na() %>% 
+  
+  ggplot(aes(x = word, y = n, fill = personal_story)) +
+  geom_col(position = "dodge") +
+  coord_flip()
+
+cm_words_bau %>%
+  select(episode, word, caught, alive, intro_quote) %>% 
+  group_by(episode, intro_quote) %>% 
+  count(word, sort = TRUE) %>% 
+  drop_na() %>% 
+  
+  ggplot(aes(x = word, y = n, fill = intro_quote)) +
+  geom_col(position = "dodge") +
+  coord_flip()
+
+cm_words_bau %>%
+  select(episode, word, caught, alive, closing_quote) %>% 
+  group_by(episode, closing_quote) %>% 
+  count(word, sort = TRUE) %>% 
+  drop_na() %>% 
+  
+  ggplot(aes(x = word, y = n, fill = closing_quote)) +
+  geom_col(position = "dodge") +
+  coord_flip()
+
+cm_words_bau %>%
+  select(episode, word, caught, alive, criminal_type_1) %>% 
+  group_by(episode, criminal_type_1) %>% 
+  count(word, sort = TRUE) %>% 
+  drop_na() %>% 
+  
+  ggplot(aes(x = word, y = n, fill = criminal_type_1)) +
+  geom_col(position = "dodge") +
+  coord_flip()
+```
+
